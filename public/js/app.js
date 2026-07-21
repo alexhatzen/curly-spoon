@@ -1,14 +1,17 @@
 (() => {
   const THEME_KEY = 'fishlog-theme';
 
-  // When the frontend is hosted separately from the backend (e.g. this site on
-  // Netlify, the API on Fly.io), point API_ORIGIN at the backend's URL. Local
-  // dev via `python3 server.py` serves both from the same origin, so it's left
-  // blank there.
-  const API_ORIGIN = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? ''
-    : 'https://your-fishlog-app.fly.dev'; // <-- replace with your Fly.io app URL
-  const API_BASE = `${API_ORIGIN}/api/catches`;
+  // Supabase project settings -> API. The anon key is meant to be public/
+  // embedded in frontend code like this; access is controlled by the Row
+  // Level Security policies in db/schema.sql, not by hiding this key.
+  const SUPABASE_URL = 'https://mkscjsfdtdlzahonjtlw.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_oOK-KC_TDatUSMIidOkjlQ__PdO64fb';
+
+  const REST = `${SUPABASE_URL}/rest/v1`;
+  const authHeaders = {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+  };
 
   const SERIES = ['--series-1', '--series-2', '--series-3', '--series-4',
                    '--series-5', '--series-6', '--series-7', '--series-8'];
@@ -20,33 +23,76 @@
 
   let catches = [];
 
-  // ---------- API ----------
+  // ---------- API (Supabase PostgREST) ----------
   async function fetchCatches() {
-    const res = await fetch(API_BASE);
+    const res = await fetch(
+      `${REST}/catches?select=id,date,weight_kg,length_cm,bait,notes,species(name),locations(name)&order=date.desc,id.desc`,
+      { headers: authHeaders }
+    );
     if (!res.ok) throw new Error('Failed to load catches');
-    catches = await res.json();
+    const rows = await res.json();
+    catches = rows.map(r => ({
+      id: r.id,
+      date: r.date,
+      weight_kg: r.weight_kg,
+      length_cm: r.length_cm,
+      bait: r.bait,
+      notes: r.notes,
+      species: r.species ? r.species.name : null,
+      location: r.locations ? r.locations.name : null,
+    }));
+  }
+
+  // Species/locations are free-typed in the form but stored as normalized
+  // tables, so look up (or create) the matching row and return its id.
+  async function upsertAndGetId(table, name) {
+    if (!name) return null;
+    let res = await fetch(`${REST}/${table}?name=eq.${encodeURIComponent(name)}&select=id`, { headers: authHeaders });
+    let rows = await res.json();
+    if (rows.length) return rows[0].id;
+
+    res = await fetch(`${REST}/${table}`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error(`Failed to create ${table} "${name}"`);
+    const inserted = await res.json();
+    return inserted[0].id;
   }
 
   async function createCatch(entry) {
-    const res = await fetch(API_BASE, {
+    const species_id = await upsertAndGetId('species', entry.species);
+    const location_id = await upsertAndGetId('locations', entry.location);
+    const res = await fetch(`${REST}/catches`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry),
+      headers: { ...authHeaders, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+      body: JSON.stringify({
+        species_id, location_id, date: entry.date,
+        weight_kg: entry.weight_kg, length_cm: entry.length_cm,
+        bait: entry.bait, notes: entry.notes,
+      }),
     });
     if (!res.ok) throw new Error('Failed to save catch');
     return res.json();
   }
 
   async function deleteCatch(id) {
-    const res = await fetch(`${API_BASE}/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${REST}/catches?id=eq.${id}`, { method: 'DELETE', headers: authHeaders });
     if (!res.ok) throw new Error('Failed to delete catch');
   }
 
   async function updateCatch(id, entry) {
-    const res = await fetch(`${API_BASE}/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(entry),
+    const species_id = await upsertAndGetId('species', entry.species);
+    const location_id = await upsertAndGetId('locations', entry.location);
+    const res = await fetch(`${REST}/catches?id=eq.${id}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        species_id, location_id, date: entry.date,
+        weight_kg: entry.weight_kg, length_cm: entry.length_cm,
+        bait: entry.bait, notes: entry.notes,
+      }),
     });
     if (!res.ok) throw new Error('Failed to update catch');
   }
