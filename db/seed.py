@@ -9,7 +9,7 @@ import random
 import sqlite3
 from datetime import date, timedelta
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "fishing.db")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(os.path.dirname(__file__), "fishing.db"))
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 random.seed(42)

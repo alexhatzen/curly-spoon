@@ -1,6 +1,14 @@
 (() => {
   const THEME_KEY = 'fishlog-theme';
-  const API_BASE = '/api/catches';
+
+  // When the frontend is hosted separately from the backend (e.g. this site on
+  // Netlify, the API on Fly.io), point API_ORIGIN at the backend's URL. Local
+  // dev via `python3 server.py` serves both from the same origin, so it's left
+  // blank there.
+  const API_ORIGIN = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? ''
+    : 'https://your-fishlog-app.fly.dev'; // <-- replace with your Fly.io app URL
+  const API_BASE = `${API_ORIGIN}/api/catches`;
 
   const SERIES = ['--series-1', '--series-2', '--series-3', '--series-4',
                    '--series-5', '--series-6', '--series-7', '--series-8'];

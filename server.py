@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Tiny backend for the fishing log: serves the static frontend and a
-REST API backed by the SQLite database in db/fishing.db.
+REST API backed by a SQLite database.
 
 Usage: python3 server.py [port]   (defaults to 8000)
+
+Env vars (used in deployment, e.g. Fly.io):
+  PORT     - port to listen on, overrides the CLI arg
+  DB_PATH  - path to the SQLite file, e.g. a mounted volume like /data/fishing.db
 """
 import json
 import os
@@ -12,7 +16,8 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "db", "fishing.db")
+STATIC_DIR = os.path.join(BASE_DIR, "public")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "db", "fishing.db"))
 
 
 def get_conn():
@@ -26,20 +31,32 @@ def get_conn():
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=BASE_DIR, **kwargs)
+        super().__init__(*args, directory=STATIC_DIR, **kwargs)
 
     def log_message(self, fmt, *args):
         pass
+
+    def _cors_headers(self):
+        # Frontend (Netlify) and backend (Fly.io) live on different origins.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def _json(self, status, payload):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
     # ---- routing ----
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors_headers()
+        self.end_headers()
+
     def do_GET(self):
         path = urlparse(self.path).path
         if path == "/api/catches":
@@ -171,7 +188,8 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    cli_port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+    port = int(os.environ.get("PORT", cli_port))
     if not os.path.exists(DB_PATH):
         print("No database found — seeding one now...")
         sys.path.insert(0, os.path.join(BASE_DIR, "db"))
